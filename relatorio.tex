@@ -1,0 +1,381 @@
+% ============================================================
+% SRTP — Relatório Técnico
+% Laboratório de Redes de Computadores — PUCRS
+% Compilar: pdflatex relatorio.tex
+% ============================================================
+\documentclass[12pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazil]{babel}
+\usepackage[top=2.54cm,bottom=2.54cm,left=2.54cm,right=2.54cm]{geometry}
+\usepackage{times}
+\usepackage{setspace}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{xcolor}
+\usepackage{soul}          % \hl{} para highlighting
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+
+\onehalfspacing
+
+% Cores para marcações de dados experimentais
+\definecolor{fillcolor}{RGB}{255,230,180}
+\definecolor{bordercolor}{RGB}{200,120,0}
+\newcommand{\FILL}[1]{%
+  \colorbox{fillcolor}{\parbox{\linewidth-2\fboxsep}{\textcolor{bordercolor}{\textbf{[INSERIR:} #1\textbf{]}}}}%
+}
+\newcommand{\FILLVAL}[1]{%
+  \colorbox{fillcolor}{\textcolor{bordercolor}{\textbf{?}}}\,%    % valor inline
+}
+
+% Cabeçalho/rodapé
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{\small SRTP — Protocolo de Transporte Confiável sobre UDP}
+\lhead{\small Lab. Redes de Computadores — PUCRS}
+\rfoot{\small Página \thepage}
+
+\titlespacing*{\section}{0pt}{10pt}{4pt}
+\titlespacing*{\subsection}{0pt}{8pt}{2pt}
+
+% ============================================================
+\begin{document}
+
+\begin{center}
+  {\large\textbf{Pontifícia Universidade Católica do Rio Grande do Sul}}\\[2pt]
+  {\normalsize Escola Politécnica — Laboratório de Redes de Computadores}\\[10pt]
+  {\LARGE\textbf{Protocolo de Transporte Confiável sobre UDP}}\\[4pt]
+  {\large Relatório Técnico — Trabalho Final}\\[6pt]
+  {\normalsize
+    \FILL{Nome completo do integrante 1} \\
+    \FILL{Nome completo do integrante 2} \\
+    \FILL{Nome completo do integrante 3 (se houver)}
+  }\\[4pt]
+  {\small \FILL{Data de entrega (ex.: 29/06/2026)}}
+\end{center}
+
+\vspace{-4pt}
+\hrule
+\vspace{6pt}
+
+% ============================================================
+\section{Visão Geral do Protocolo}
+
+O SRTP (\textit{Simple Reliable Transport Protocol}) opera sobre UDP e implementa
+três mecanismos de controle de fluxo e erros: \textit{Stop-and-Wait} (SAW),
+\textit{Go-Back-N} (GBN) e \textit{Selective Repeat} (SR). O cabeçalho de 9 bytes
+contém os campos SYN, FIN, SEQ (14 bits), ACK\_flag, NACK, ACK (14 bits),
+Length (8 bits) e CRC32 (32 bits). Pacotes com CRC inválido são descartados
+silenciosamente; o \textit{timeout} de 100\,ms dispara a retransmissão. O handshake
+de três vias negocia a janela efetiva (mínimo entre as janelas propostas pelas
+duas partes).
+
+% ============================================================
+\section{Parte 1 — Stop-and-Wait}
+
+\subsection{Throughput Teórico Máximo}
+
+No SAW, o emissor aguarda o ACK antes de enviar o próximo pacote. A eficiência
+do protocolo é dada por (Kurose \& Ross, Seção~3.4):
+
+\begin{equation}
+  \eta_{\text{SAW}} = \frac{L/R}{\,RTT + L/R\,} = \frac{1}{1 + 2a}
+  \label{eq:saw}
+\end{equation}
+
+onde $L$ é o tamanho do pacote em bits, $R$ a taxa do enlace e
+$a = T_{\text{prop}} / T_{\text{trans}}$ é a razão entre o atraso de
+propagação e o tempo de transmissão.
+
+\noindent\textbf{Parâmetros da implementação:}
+\begin{itemize}[nosep]
+  \item Payload máximo: 255\,bytes; cabeçalho: 9\,bytes $\Rightarrow$
+        $L_{\text{pkt}} = 264\,\text{bytes} = 2112\,\text{bits}$
+  \item Taxa do enlace $R$: Ethernet Gigabit ($R = 10^{9}$\,bps)
+  \item Tempo de transmissão: $T_{\text{trans}} = 2112 / 10^{9} \approx 2{,}1\,\mu\text{s}$
+\end{itemize}
+
+\vspace{4pt}
+\FILL{Inserir o RTT medido no Wireshark no cenário L0/P0 (captura \texttt{saw\_L0.pcapng}).
+Procure o tempo entre o início do pacote de dados e o ACK correspondente — esse é o RTT
+observado. Exemplo de linha: \emph{``RTT medido no cenário L0/P0: X\,ms (média de Y amostras)''}.}
+
+\vspace{4pt}
+\noindent Com $RTT = $ \FILLVAL{} ms, tem-se $a = RTT/(2\,T_{\text{trans}}) = $ \FILLVAL{}
+e, pela Equação~\ref{eq:saw}:
+
+\begin{equation*}
+  \eta_{\text{SAW}} = \frac{1}{1 + 2 \times \FILLVAL{}} \approx \FILLVAL{}\%
+  \quad\Rightarrow\quad
+  S_{\text{teórico}} = \eta \cdot R \approx \FILLVAL{}\,\text{kbps}
+\end{equation*}
+
+\FILL{Inserir o throughput \textbf{medido} no cenário L0/P0 (bytes transferidos / tempo total
+reportado pelo sender). Compare com o valor teórico acima e discuta possíveis
+discrepâncias (overhead de chamadas de sistema, jitter local, etc.).}
+
+% ---------------------------------------------------------
+\subsection{Cenários de Latência (L0–L3)}
+
+Latência adicional inserida com \textit{Clumsy} no sender ou receiver.
+A Tabela~\ref{tab:latencia_saw} apresenta os resultados.
+
+\begin{table}[H]
+\centering
+\caption{SAW — Throughput e retransmissões sob latência artificial.}
+\label{tab:latencia_saw}
+\begin{tabular}{@{}cccc@{}}
+\toprule
+\textbf{Cenário} & \textbf{Latência adicional} & \textbf{Throughput medido} & \textbf{Retransmissões} \\
+\midrule
+L0 & 0\,ms (baseline) & \FILLVAL{}\,kbps & \FILLVAL{} \\
+L1 & 50\,ms            & \FILLVAL{}\,kbps & \FILLVAL{} \\
+L2 & 100\,ms           & \FILLVAL{}\,kbps & \FILLVAL{} \\
+L3 & 150\,ms           & \FILLVAL{}\,kbps & \FILLVAL{} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\FILL{Análise dos cenários de latência: explique como o aumento do RTT reduz o throughput
+no SAW (conforme a Equação~\ref{eq:saw}). Destaque a transição L1→L2: com latência de
+100\,ms adicionada, o RTT total se aproxima ou supera o timeout de 100\,ms, causando
+retransmissões mesmo sem perda real. Na transição L2→L3 (150\,ms), o RTT efetivo excede
+o timeout com mais frequência, aumentando ainda mais as retransmissões e degradando o
+throughput. Use os dados da tabela e as capturas Wireshark como evidência.}
+
+% ---------------------------------------------------------
+\subsection{Cenários de Perda (P0–P4)}
+
+Taxa de perda artificial inserida com \textit{Clumsy}.
+
+\begin{table}[H]
+\centering
+\caption{SAW — Throughput e retransmissões sob perda de pacotes.}
+\label{tab:perda_saw}
+\begin{tabular}{@{}cccc@{}}
+\toprule
+\textbf{Cenário} & \textbf{Taxa de perda} & \textbf{Throughput medido} & \textbf{Retransmissões} \\
+\midrule
+P0 & 0\%  (baseline) & \FILLVAL{}\,kbps & \FILLVAL{} \\
+P1 & 1\%             & \FILLVAL{}\,kbps & \FILLVAL{} \\
+P2 & 5\%             & \FILLVAL{}\,kbps & \FILLVAL{} \\
+P3 & 10\%            & \FILLVAL{}\,kbps & \FILLVAL{} \\
+P4 & 25\%            & \FILLVAL{}\,kbps & \FILLVAL{} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent O throughput esperado sob perda independente com probabilidade $p$ é:
+
+\begin{equation}
+  S_{\text{SAW}}(p) = \frac{(1-p)\,L}{\,RTT + L/R\,}
+  \label{eq:saw_loss}
+\end{equation}
+
+pois o número esperado de transmissões por pacote é $1/(1-p)$ (distribuição geométrica)
+e cada transmissão ocupa $RTT + L/R$ segundos.
+
+\FILL{Análise dos cenários de perda: compare os valores medidos da tabela com o
+throughput teórico da Equação~\ref{eq:saw_loss} para cada taxa $p$. Explique como
+25\% de perda impacta desproporcionalmente o throughput no SAW — cada retransmissão
+consome um timeout completo de 100\,ms. Cite os números de retransmissões e use as
+capturas para identificar padrões de timeout.}
+
+% ---------------------------------------------------------
+\subsection{Comportamento do CRC32}
+
+O checksum CRC32 é calculado sobre o cabeçalho completo (com o campo CRC zerado)
+concatenado com o payload. Pacotes corrompidos são \textbf{descartados silenciosamente}
+pelo receiver sem envio de NACK, pois nenhum campo — inclusive o SEQ — é confiável.
+O \textit{timeout} de 100\,ms no sender dispara a retransmissão.
+
+\FILL{Inserir referência à captura Wireshark que demonstra o descarte silencioso.
+Descreva: (a) como o pacote corrompido foi identificado na captura (ex.: campo CRC
+incorreto ou ausência de ACK após o envio); (b) o comportamento do sender após o
+timeout (retransmissão do mesmo SEQ); (c) o que ocorreria sem CRC32 — o receiver
+aceitaria dados corrompidos como válidos, causando corrupção silenciosa do arquivo
+transferido sem possibilidade de detecção na camada de transporte.}
+
+% ============================================================
+\section{Parte 2 — Go-Back-N e Selective Repeat}
+
+\subsection{Throughput Teórico sob Latência}
+
+Com janela de tamanho $N$, a eficiência do protocolo de janela deslizante é:
+
+\begin{equation}
+  \eta_{\text{GBN/SR}} =
+  \begin{cases}
+    1, & N \geq 1 + 2a \\[4pt]
+    \dfrac{N}{1 + 2a}, & N < 1 + 2a
+  \end{cases}
+  \label{eq:window}
+\end{equation}
+
+Para o cenário L0 ($RTT \approx$ \FILLVAL{} ms), tem-se $1 + 2a \approx$ \FILLVAL{}.
+Com $N = 4$: $\eta \approx$ \FILLVAL{}\%.
+Com $N = 16$: $\eta \approx$ \FILLVAL{}\%.
+
+% ---------------------------------------------------------
+\subsection{Análise Comparativa sob Latência (SAW vs.\ GBN vs.\ SR)}
+
+\begin{table}[H]
+\centering
+\caption{Throughput (kbps) dos três protocolos sob latência — janela $N=4$.}
+\label{tab:lat_comp}
+\begin{tabular}{@{}ccccc@{}}
+\toprule
+\textbf{Cenário} & \textbf{Latência} & \textbf{SAW} & \textbf{GBN (N=4)} & \textbf{SR (N=4)} \\
+\midrule
+L0 & 0\,ms   & \FILLVAL{} & \FILLVAL{} & \FILLVAL{} \\
+L1 & 50\,ms  & \FILLVAL{} & \FILLVAL{} & \FILLVAL{} \\
+L2 & 100\,ms & \FILLVAL{} & \FILLVAL{} & \FILLVAL{} \\
+L3 & 150\,ms & \FILLVAL{} & \FILLVAL{} & \FILLVAL{} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\FILL{Análise comparativa sob latência: a janela deslizante desacopla o throughput
+do RTT quando $N \geq 1+2a$ — o sender não precisa parar para aguardar ACK. Explique
+por que GBN e SR mantêm throughput significativamente superior ao SAW em L2 e L3.
+Identifique o ponto a partir do qual mesmo GBN/SR começam a sofrer (quando o RTT
+excede o timeout e a janela esgota antes dos ACKs chegarem).}
+
+% ---------------------------------------------------------
+\subsection{Análise Comparativa sob Perda (GBN vs.\ SR)}
+
+\begin{table}[H]
+\centering
+\caption{Throughput (kbps) e retransmissões sob perda — GBN e SR com $N=4$ e $N=16$.}
+\label{tab:loss_comp}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{@{}ccccccccc@{}}
+\toprule
+& & \multicolumn{3}{c}{\textbf{GBN}} & & \multicolumn{3}{c}{\textbf{SR}} \\
+\cmidrule{3-5}\cmidrule{7-9}
+\textbf{Cen.} & \textbf{Perda} & N=4 kbps & N=4 retx & N=16 retx & & N=4 kbps & N=4 retx & N=16 retx \\
+\midrule
+P1 & 1\%  & \FILLVAL{} & \FILLVAL{} & \FILLVAL{} & & \FILLVAL{} & \FILLVAL{} & \FILLVAL{} \\
+P2 & 5\%  & \FILLVAL{} & \FILLVAL{} & \FILLVAL{} & & \FILLVAL{} & \FILLVAL{} & \FILLVAL{} \\
+P3 & 10\% & \FILLVAL{} & \FILLVAL{} & \FILLVAL{} & & \FILLVAL{} & \FILLVAL{} & \FILLVAL{} \\
+P4 & 25\% & \FILLVAL{} & \FILLVAL{} & \FILLVAL{} & & \FILLVAL{} & \FILLVAL{} & \FILLVAL{} \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\FILL{Análise comparativa sob perda: no GBN, um único pacote perdido obriga a
+retransmissão de \emph{toda} a janela ($N$ pacotes). No SR, apenas o pacote
+específico é retransmitido. Com perda alta (P4 = 25\%) e janela grande ($N=16$),
+o GBN retransmite até 16 pacotes por evento de perda — explique como isso degrada
+o throughput em relação ao SR. Relacione com a Equação~\ref{eq:window}: no GBN sob
+perda, a eficiência efetiva é $\eta_{\text{GBN}} \approx N(1-p)^N / (1+2a)$,
+enquanto no SR $\eta_{\text{SR}} \approx (1-p) \cdot \min(N, 1+2a) / (1+2a)$.}
+
+% ---------------------------------------------------------
+\subsection{Análise Comparativa sob Reordenação (R0–R2)}
+
+Este é o ponto central da Parte~2. A reordenação de pacotes expõe a diferença
+fundamental de comportamento entre GBN e SR.
+
+\begin{table}[H]
+\centering
+\caption{Throughput (kbps) e retransmissões sob reordenação — $N=4$ e $N=16$.}
+\label{tab:reorder}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{@{}ccccccc@{}}
+\toprule
+& & \multicolumn{2}{c}{\textbf{GBN}} & & \multicolumn{2}{c}{\textbf{SR}} \\
+\cmidrule{3-4}\cmidrule{6-7}
+\textbf{Cen.} & \textbf{Reordenação} & N=4 (kbps / retx) & N=16 (kbps / retx) & & N=4 (kbps / retx) & N=16 (kbps / retx) \\
+\midrule
+R0 & 0\%  & \FILLVAL{} / \FILLVAL{} & \FILLVAL{} / \FILLVAL{} & & \FILLVAL{} / \FILLVAL{} & \FILLVAL{} / \FILLVAL{} \\
+R1 & 10\% & \FILLVAL{} / \FILLVAL{} & \FILLVAL{} / \FILLVAL{} & & \FILLVAL{} / \FILLVAL{} & \FILLVAL{} / \FILLVAL{} \\
+R2 & 25\% & \FILLVAL{} / \FILLVAL{} & \FILLVAL{} / \FILLVAL{} & & \FILLVAL{} / \FILLVAL{} & \FILLVAL{} / \FILLVAL{} \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\noindent\textbf{GBN sob reordenação:} o receiver descarta qualquer pacote recebido
+fora da ordem esperada e emite um NACK para o SEQ esperado. O sender, ao receber o
+NACK ou ao sofrer timeout, retransmite \emph{toda a janela} a partir do SEQ não
+confirmado.
+
+\FILL{Descreva o comportamento observado nas capturas \texttt{gbn\_R1.pcapng} e
+\texttt{gbn\_R2.pcapng}: identifique os grupos de retransmissão em lote após cada
+evento de reordenação. Explique por que janelas maiores sofrem mais em reordenação
+(cada evento de reordenação com $N=16$ gera até 16 retransmissões).}
+
+\noindent\textbf{SR sob reordenação:} o receiver bufferiza o pacote fora de ordem
+dentro da janela, emite ACK individual para ele e aguarda o pacote faltante. Quando
+o pacote faltante chega, entrega ambos em ordem sem solicitar retransmissão.
+
+\FILL{Descreva o comportamento nas capturas \texttt{sr\_R1.pcapng} e
+\texttt{sr\_R2.pcapng}: identifique os ACKs individuais fora de ordem e a ausência
+de retransmissões em lote. Explique por que o SR praticamente não sofre com
+reordenação — ele reconhece que um pacote em ordem diferente ainda é válido e o
+retém no buffer.}
+
+% ---------------------------------------------------------
+\subsection{Impacto do Tamanho de Janela}
+
+\FILL{Para cada protocolo (GBN e SR), compare os resultados obtidos com $N=4$ e
+$N=16$. Siga a estrutura: (a) sob latência — janela maior reduz o impacto do RTT
+conforme a Equação~\ref{eq:window}, mostrando ganho de throughput até $N \geq 1+2a$;
+(b) sob perda — no GBN, janela maior amplifica o custo de retransmissão; no SR,
+o impacto é menor pois só o pacote específico é reenviado; (c) sob reordenação —
+janela maior aumenta o custo no GBN (mais pacotes retransmitidos por evento) mas tem
+impacto mínimo no SR. Use os dados das Tabelas~\ref{tab:lat_comp},
+\ref{tab:loss_comp} e~\ref{tab:reorder}.}
+
+% ---------------------------------------------------------
+\subsection{Conclusão Comparativa}
+
+A Tabela~\ref{tab:conclusao} sintetiza as condições de rede em que cada protocolo
+é mais adequado, fundamentada nos dados coletados.
+
+\begin{table}[H]
+\centering
+\caption{Síntese comparativa dos três protocolos.}
+\label{tab:conclusao}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Condição de rede} & \textbf{SAW} & \textbf{GBN} & \textbf{SR} \\
+\midrule
+Baixa latência, sem perda      & Adequado & Melhor & Melhor \\
+Alta latência ($> 50$\,ms)     & Inadequado & Bom & Bom \\
+Alta perda ($> 5\%$)           & Ruim & Ruim (janela grande) & Bom \\
+Alta reordenação               & N/A & Ruim & Bom \\
+Complexidade de implementação  & Baixa & Média & Alta \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\FILL{Escreva 4–6 linhas de conclusão comparativa baseada nos seus dados medidos.
+Exemplo de estrutura: ``O SAW mostrou-se viável apenas em [cenário X], atingindo
+throughput de [Y] kbps no cenário L0/P0. O GBN superou o SAW em [X]\% no cenário
+L1, mas degradou-se em [Z]\% sob P4 com N=16 devido ao custo de retransmissão em
+lote. O SR demonstrou melhor equilíbrio entre latência e perda, especialmente nos
+cenários R1 e R2, onde o GBN sofreu [W] retransmissões contra [V] no SR.
+Conclui-se que o SR é o protocolo mais robusto para redes com perda e reordenação,
+enquanto o GBN oferece implementação mais simples com desempenho comparável em
+redes sem perda.''\ Adapte com os números reais.}
+
+% ============================================================
+\vspace{6pt}
+\hrule
+\vspace{4pt}
+\noindent{\footnotesize
+\textbf{Nota sobre os marcadores} [\textcolor{bordercolor}{INSERIR: ...}]:
+esses campos em laranja devem ser substituídos pelos dados experimentais coletados
+durante os testes com o Wireshark entre as máquinas do grupo. Remova os marcadores
+antes da entrega final.
+}
+
+\end{document}
