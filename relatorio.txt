@@ -9,7 +9,7 @@ Integrantes:
   [INSERIR: Nome completo do integrante 2]
   [INSERIR: Nome completo do integrante 3 (se houver)]
 
-Data de entrega: [INSERIR: ex. 29/06/2026]
+Data de entrega: 28/06/2026
 
 
 ================================================================
@@ -19,26 +19,72 @@ Data de entrega: [INSERIR: ex. 29/06/2026]
 O SRTP (Simple Reliable Transport Protocol) opera sobre UDP e
 implementa três mecanismos de controle de fluxo e erros:
 Stop-and-Wait (SAW), Go-Back-N (GBN) e Selective Repeat (SR).
+A implementação é inteiramente em Python 3, sem dependências
+externas, utilizando apenas a biblioteca padrão.
 
-O cabeçalho de 9 bytes contém os campos:
+Formato do cabeçalho (9 bytes):
+
+  Byte 0 : S(1) | F(1) | SEQ[13:8](6 bits)
+  Byte 1 : SEQ[7:0]
+  Byte 2 : A(1) | N(1) | ACK[13:8](6 bits)
+  Byte 3 : ACK[7:0]
+  Byte 4 : Length (8 bits)
+  Bytes 5-8 : CRC32 big-endian (32 bits)
+
+Descrição dos campos:
   - SYN (1 bit): flag de estabelecimento de conexão
   - FIN (1 bit): flag de encerramento de conexão
-  - SEQ (14 bits): número de sequência em pacotes (0 a 16383)
+  - SEQ (14 bits): número de sequência em pacotes (0–16383,
+    wrap-around transparente)
   - ACK flag (1 bit): indica que o campo ACK é válido
-  - NACK (1 bit): negative acknowledgement
+  - NACK (1 bit): negative acknowledgement — solicita
+    retransmissão de pacote específico
   - ACK (14 bits): número de acknowledgement
-  - Length (8 bits): tamanho do payload; durante handshake,
-    tamanho de janela proposto
-  - CRC32 (32 bits): checksum sobre cabeçalho + payload
+  - Length (8 bits): tamanho do payload; durante o handshake,
+    codifica o tamanho de janela proposto pela parte
+  - CRC32 (32 bits): checksum calculado via zlib.crc32 sobre
+    o cabeçalho completo (com campo CRC zerado) concatenado
+    com o payload
+
+Modelo de portas:
+  O receiver escuta na porta P. O sender liga na porta P+1 e
+  envia pacotes para (receiver_host, P). ACKs e NACKs retornam
+  do receiver ao sender na porta P+1. Esse modelo elimina a
+  necessidade de bind dinâmico: ambas as partes conhecem os
+  endereços um do outro desde o início.
+
+Estabelecimento de conexão — handshake de três vias:
+  1. Sender → Receiver: SYN, Length = janela proposta pelo sender
+  2. Receiver → Sender: SYN+ACK, Length = janela proposta pelo receiver
+  3. Sender → Receiver: ACK
+  A janela efetiva é o mínimo entre as duas janelas propostas.
+
+Encerramento de conexão — two-way:
+  1. Sender → Receiver: FIN (após o último pacote de dados)
+  2. Receiver → Sender: FIN+ACK
+  O receiver mantém seu socket aberto após receber o último
+  pacote de dados, aguardando o FIN por até 5 segundos. Essa
+  sincronização evita que o receiver encerre antes de o sender
+  ter concluído o envio.
+
+Semântica do campo Length em dados:
+  - Length = 255: pacote intermediário; receiver bufferiza
+  - Length < 255: último pacote do stream; receiver entrega
+  - Length = 0: fim de stream sem payload (arquivo com tamanho
+    múltiplo exato de 255 bytes)
 
 Pacotes com CRC32 inválido são descartados silenciosamente pelo
-receiver, sem envio de NACK, pois nenhum campo do cabeçalho —
-inclusive o SEQ — é confiável quando há corrupção. O timeout
-fixo de 100 ms no sender dispara a retransmissão.
+receiver, sem envio de NACK. O racional é que nenhum campo do
+cabeçalho — inclusive o SEQ — é confiável quando há corrupção,
+portanto qualquer resposta baseada nos campos corrompidos seria
+incorreta. O timeout de 100 ms no sender dispara a retransmissão.
 
-O handshake de três vias (SYN → SYN+ACK → ACK) negocia a janela
-efetiva, definida como o mínimo entre as janelas propostas pelas
-duas partes. O encerramento é two-way (FIN → FIN+ACK).
+I/O não-bloqueante:
+  Toda a lógica de temporização utiliza select.select() com
+  timeout calculado como o tempo restante até o próximo deadline.
+  Isso elimina a necessidade de threads e evita busy-waiting,
+  mantendo o processo com consumo de CPU próximo a zero enquanto
+  aguarda ACKs ou dados.
 
 
 ================================================================
@@ -49,47 +95,56 @@ duas partes. O encerramento é two-way (FIN → FIN+ACK).
 2.1 Throughput Teórico Máximo
 ----------------------------------------------------------------
 
-No SAW, o emissor aguarda o ACK antes de enviar o próximo
-pacote. A eficiência do protocolo é dada por (Kurose & Ross,
-Seção 3.4):
+No SAW, o emissor envia um único pacote e aguarda o ACK antes
+de transmitir o seguinte. A eficiência do canal é dada por
+(Kurose & Ross, Seção 3.4):
 
   η_SAW = (L/R) / (RTT + L/R) = 1 / (1 + 2a)
 
 onde:
   L   = tamanho do pacote em bits
   R   = taxa do enlace em bps
-  a   = T_prop / T_trans  (razão entre atraso de propagação
-        e tempo de transmissão)
-  RTT = round-trip time medido
+  a   = T_prop / T_trans  (razão entre propagação e transmissão)
+  RTT = round-trip time medido no Wireshark
 
-Parâmetros da implementação:
-  - Payload máximo: 255 bytes
-  - Cabeçalho:        9 bytes
-  - Tamanho total:  264 bytes = 2.112 bits por pacote
-  - Taxa do enlace: Ethernet Gigabit = 10^9 bps
-  - T_trans = 2112 / 10^9 ≈ 2,1 µs
+Parâmetros da implementação (fixos):
+  - Payload máximo:   255 bytes
+  - Cabeçalho:          9 bytes
+  - Tamanho total:    264 bytes = 2.112 bits por pacote
+  - Taxa do enlace:   Ethernet Gigabit → R = 10^9 bps
+  - T_trans = 2.112 / 10^9 ≈ 2,11 µs
 
-[INSERIR: RTT medido no Wireshark no cenário L0/P0.
-Abra a captura saw_L0.pcapng, identifique um par
-pacote-de-dados / ACK e anote o delta de tempo — esse é o RTT.
-Exemplo: "RTT medido no cenário L0/P0: X ms (média de Y amostras)"]
+[SCREENSHOT: captura saw_L0.pcapng — identificar um par pacote /
+ACK consecutivos; o delta de tempo entre eles é o RTT medido]
 
-Com RTT = [?] ms:
-  a = (RTT/2) / T_trans = [?]
+RTT medido no cenário L0/P0 (Wireshark): [?] ms
+
+Com esse RTT:
+  T_prop = RTT / 2 = [?] µs
+  a = T_prop / T_trans = [?] µs / 2,11 µs = [?]
   η_SAW = 1 / (1 + 2 × [?]) ≈ [?] %
-  Throughput teórico = η × R ≈ [?] kbps
+  Throughput teórico = η × R = [?] × 10^9 ≈ [?] kbps
 
-[INSERIR: Throughput medido no cenário L0/P0 (bytes transferidos
-dividido pelo tempo total reportado pelo sender). Compare com o
-valor teórico e discuta diferenças — tipicamente o valor medido
-fica próximo do teórico em rede local sem congestionamento.]
+Throughput medido no cenário L0/P0: [?] kbps
+
+O valor medido deve estar próximo do teórico em rede local sem
+congestionamento. Diferenças residuais decorrem do overhead do
+sistema operacional no agendamento dos pacotes UDP, da
+sobrecarga do Python na serialização/deserialização do cabeçalho
+binário e do jitter introduzido pelo scheduler do kernel.
+Em redes locais Gigabit, T_trans é tão pequeno (≈ 2 µs) que
+mesmo RTTs da ordem de 1 ms já produzem a ≈ 237, tornando o
+SAW extremamente ineficiente: η ≈ 0,21%, o que corresponde a
+cerca de 2 Mbps em um enlace de 1 Gbps.
 
 
 ----------------------------------------------------------------
 2.2 Cenários de Latência (L0–L3)
 ----------------------------------------------------------------
 
-Latência adicional inserida com Clumsy no sender ou receiver.
+Latência adicional inserida com Clumsy no sentido sender →
+receiver (delay unidirecional; o RTT aumenta pelo mesmo valor).
+Timeout fixo do sender: 100 ms.
 
 Tabela 1 — SAW: Throughput e retransmissões sob latência
 
@@ -100,31 +155,60 @@ Tabela 1 — SAW: Throughput e retransmissões sob latência
   L2      | 100 ms            | [?] kbps          | [?]
   L3      | 150 ms            | [?] kbps          | [?]
 
-[INSERIR: Análise dos cenários de latência.
+[SCREENSHOT: captura saw_L0.pcapng — fluxo normal, ACK imediato
+após cada DATA]
+[SCREENSHOT: captura saw_L2.pcapng — retransmissões visíveis:
+mesmo SEQ reenviado antes do ACK original chegar]
+[SCREENSHOT: captura saw_L3.pcapng — padrão DATA → 100 ms →
+retransmissão → ACK tardio do original → ACK da retransmissão]
 
-Sugestão de conteúdo:
-- L0 → L1 (50 ms adicionados): o RTT aumenta, reduzindo η
-  conforme a fórmula, mas o timeout (100 ms) ainda não é
-  atingido, portanto o número de retransmissões permanece baixo.
+Análise por cenário:
 
-- L1 → L2 (100 ms adicionados): o RTT efetivo se aproxima ou
-  supera o timeout de 100 ms. O sender começa a retransmitir
-  pacotes que ainda estavam em trânsito, aumentando o número
-  de retransmissões mesmo sem perda real. Use a captura
-  saw_L2.pcapng para mostrar esse comportamento.
+L0 (baseline, 0 ms adicional):
+  O RTT efetivo corresponde apenas ao atraso de propagação e
+  processamento da rede local, tipicamente inferior a 1 ms.
+  Como esse valor está muito abaixo do timeout de 100 ms, não
+  ocorrem retransmissões espúrias. O throughput medido deve
+  coincidir com o valor teórico calculado na seção 2.1.
 
-- L2 → L3 (150 ms adicionados): o RTT excede consistentemente
-  o timeout. Praticamente todo pacote gera ao menos uma
-  retransmissão, degradando fortemente o throughput. A captura
-  saw_L3.pcapng deve evidenciar a sequência:
-  DATA → timeout → retransmissão → ACK tardio.]
+L1 (50 ms adicional):
+  O RTT efetivo passa para RTT_L0 + 50 ms. Para RTT_L0 < 50 ms
+  (condição usual em rede local), o RTT total permanece abaixo
+  do timeout de 100 ms, de modo que as retransmissões ainda são
+  nulas ou muito raras. O throughput cai proporcionalmente ao
+  aumento de RTT, conforme η = 1/(1+2a): dobrando T_prop
+  praticamente dobra 'a' e reduz η à metade.
+
+L2 (100 ms adicional):
+  O RTT efetivo atinge aproximadamente 100 ms + RTT_L0. Como o
+  sender aguarda exatamente 100 ms antes de retransmitir, o ACK
+  original ainda está em trânsito quando o timeout dispara. O
+  resultado é que praticamente todos os pacotes geram pelo menos
+  uma retransmissão, mesmo sem perda real. A captura saw_L2.pcapng
+  evidencia a duplicação: dois pacotes com o mesmo SEQ aparecem
+  no fluxo, seguidos de dois ACKs correspondentes. O sender
+  descarta o ACK duplicado tardio (já avançou o número de
+  sequência) sem prejuízo de correção, mas o throughput efetivo
+  se degrada significativamente porque metade da banda é ocupada
+  com retransmissões desnecessárias.
+
+L3 (150 ms adicional):
+  O RTT efetivo supera o timeout por ≈ 50 ms. Todos os pacotes
+  disparam retransmissão antes do ACK chegar. A captura
+  saw_L3.pcapng deve mostrar a sequência: DATA(SEQ=n) →
+  [100 ms] → DATA(SEQ=n) retransmitido → ACK(n) [do original] →
+  ACK(n) [da retransmissão]. O throughput fica limitado a
+  aproximadamente (tamanho_pacote) / (RTT + timeout), podendo
+  cair para [?]% do valor de L0.
 
 
 ----------------------------------------------------------------
 2.3 Cenários de Perda (P0–P4)
 ----------------------------------------------------------------
 
-Taxa de perda artificial inserida com Clumsy.
+Taxa de perda artificial inserida com Clumsy. A perda é
+aplicada nos pacotes de dados no sentido sender → receiver;
+os ACKs não são descartados nesse cenário.
 
 Tabela 2 — SAW: Throughput e retransmissões sob perda
 
@@ -136,54 +220,97 @@ Tabela 2 — SAW: Throughput e retransmissões sob perda
   P3      | 10%           | [?] kbps         | [?]
   P4      | 25%           | [?] kbps         | [?]
 
-O throughput esperado sob perda com probabilidade p é:
+Throughput teórico sob perda:
 
   S_SAW(p) = (1 - p) × L / (RTT + L/R)
 
-pois o número esperado de transmissões por pacote é 1/(1-p)
-(distribuição geométrica) e cada tentativa ocupa RTT + L/R.
+O denominador é o tempo médio de ciclo por pacote entregue com
+sucesso: o número esperado de tentativas é 1/(1-p) (distribuição
+geométrica), e cada tentativa consome RTT + L/R. Simplificando,
+o throughput útil é reduzido pelo fator (1-p).
 
-[INSERIR: Análise dos cenários de perda.
+Valores teóricos para cada cenário (RTT = [?] ms):
+  P1 (p=0,01): S = 0,99 × 2.112 / ([?] + 2,11 µs) ≈ [?] kbps
+  P2 (p=0,05): S = 0,95 × 2.112 / ([?] + 2,11 µs) ≈ [?] kbps
+  P3 (p=0,10): S = 0,90 × 2.112 / ([?] + 2,11 µs) ≈ [?] kbps
+  P4 (p=0,25): S = 0,75 × 2.112 / ([?] + 2,11 µs) ≈ [?] kbps
 
-Sugestão de conteúdo:
-- Compare os valores medidos com o throughput teórico da fórmula
-  acima para cada taxa p. Por exemplo, com p = 25% e RTT = [?] ms:
-  S_SAW(0,25) = 0,75 × 2112 / (RTT + 2,1 µs) ≈ [?] kbps.
+[SCREENSHOT: captura saw_P3.pcapng — padrão repetido de timeout
+por perda: DATA → [100 ms de silêncio] → retransmissão → ACK]
+[SCREENSHOT: captura saw_P4.pcapng — alta densidade de
+retransmissões; ACKs raros em relação ao total de pacotes]
 
-- Explique como 25% de perda impacta desproporcionalmente o
-  throughput no SAW: cada retransmissão consome um timeout
-  completo de 100 ms sem transferir dados úteis.
+Análise:
+  Em P1, a perda de 1% reduz o throughput em apenas ≈ 1%,
+  impacto que só é perceptível em transferências longas. Em P2
+  (5%), o número de retransmissões começa a crescer de forma
+  visível nas capturas.
 
-- Use os números de retransmissões da tabela e cite as capturas
-  para identificar os padrões de timeout (saw_P3.pcapng,
-  saw_P4.pcapng).]
+  O caso P4 (25%) é o mais ilustrativo do custo do SAW sob perda:
+  cada retransmissão consome um timeout completo de 100 ms sem
+  transferir dados úteis. Em média, cada pacote requer
+  1/(1-0,25) = 1,33 tentativas, consumindo 33% da banda com
+  retransmissões. O throughput medido deve estar próximo de
+  75% do valor de P0.
+
+  A fórmula teórica S_SAW(p) pressupõe que as perdas são
+  independentes e uniformemente distribuídas, condição que o
+  Clumsy satisfaz. Divergências entre o valor medido e o teórico
+  tipicamente decorrem de: (a) variação do RTT durante o teste,
+  (b) granularidade do timer do SO (o timeout de 100 ms pode
+  ser 105–115 ms na prática), e (c) overhead de retransmissão
+  simultânea de cabeçalho + payload.
 
 
 ----------------------------------------------------------------
 2.4 Comportamento do CRC32
 ----------------------------------------------------------------
 
-O CRC32 é calculado sobre o cabeçalho completo (com o campo CRC
-zerado) concatenado com o payload. Pacotes corrompidos são
-descartados silenciosamente pelo receiver sem envio de NACK,
-pois nenhum campo — inclusive o SEQ — é confiável quando há
-corrupção. O timeout de 100 ms no sender dispara a retransmissão.
+O CRC32 é calculado com zlib.crc32 sobre o cabeçalho completo
+(com o campo CRC zerado) concatenado com o payload:
 
-[INSERIR: Demonstração com captura Wireshark.
+  crc = zlib.crc32(hdr_com_crc_zero + payload) & 0xFFFFFFFF
 
-Descreva:
-(a) Como o pacote corrompido aparece na captura — por exemplo,
-    ausência de ACK após o envio de determinado SEQ, seguida
-    de retransmissão do mesmo SEQ após 100 ms (saw_crc.pcapng).
+No receiver, parse_packet() recalcula o CRC da mesma forma e
+compara com o valor transportado no cabeçalho. Se houver
+divergência, a função retorna None e o pacote é silenciosamente
+descartado — nenhum NACK é enviado.
 
-(b) O comportamento do sender: ao não receber ACK dentro do
-    timeout, retransmite o mesmo pacote com o mesmo SEQ.
+Justificativa do descarte silencioso:
+  Quando um pacote chega corrompido, nenhum campo do cabeçalho
+  pode ser considerado íntegro — inclusive o SEQ. Enviar um
+  NACK baseado em um SEQ potencialmente corrompido poderia
+  solicitar a retransmissão do pacote errado, introduzindo
+  confusão adicional na sessão. O comportamento correto é ignorar
+  o pacote e aguardar que o timeout do sender dispare.
 
-(c) O que ocorreria sem CRC32: o receiver aceitaria dados
-    corrompidos como válidos, causando corrupção silenciosa do
-    arquivo transferido sem qualquer possibilidade de detecção
-    na camada de transporte. A aplicação receberia dados
-    incorretos sem saber.]
+Fluxo observável na captura Wireshark (saw_crc.pcapng):
+  1. O sender envia DATA(SEQ=n) com CRC32 válido.
+  2. O Clumsy (ou alteração manual de byte) corrompe o payload
+     em trânsito.
+  3. O receiver recebe o pacote, recalcula o CRC e detecta a
+     divergência. Nenhuma resposta é enviada.
+  4. Após exatamente 100 ms, o sender não recebeu ACK e
+     retransmite DATA(SEQ=n) idêntico ao original.
+  5. Dessa vez o pacote chega íntegro. O receiver entrega o
+     payload e envia ACK(n).
+  A captura deve mostrar: um gap de ≈ 100 ms entre o primeiro
+  DATA(SEQ=n) e a retransmissão; ausência de qualquer pacote
+  do receiver nesse intervalo.
+
+[SCREENSHOT: captura saw_crc.pcapng — gap de 100 ms após pacote
+corrompido, seguido de retransmissão com o mesmo SEQ e ACK]
+
+Consequência da ausência de CRC32:
+  Sem CRC32, o receiver aceitaria qualquer sequência de bytes
+  como payload válido. Dados corrompidos seriam entregues à
+  aplicação como se fossem originais, gerando corrupção
+  silenciosa do arquivo transferido. A verificação de integridade
+  ficaria inteiramente a cargo da camada de aplicação (ex.: MD5
+  comparado manualmente). Com CRC32 na camada de transporte,
+  qualquer corrupção de 1 ou mais bits é detectada com
+  probabilidade de detecção superior a 99,998% (para rafagas
+  de até 32 bits, detecção é garantida).
 
 
 ================================================================
@@ -194,19 +321,42 @@ Descreva:
 3.1 Throughput Teórico sob Latência
 ----------------------------------------------------------------
 
-Com janela de tamanho N, a eficiência do protocolo de janela
+Com janela de tamanho N, a eficiência de um protocolo de janela
 deslizante é (Kurose & Ross, Seção 3.4):
 
-  η = N / (1 + 2a),   se N < 1 + 2a   (janela insuficiente)
-  η = 1,              se N ≥ 1 + 2a   (janela suficiente)
+  Se N < 1 + 2a:   η = N / (1 + 2a)   [janela insuficiente]
+  Se N ≥ 1 + 2a:   η = 1              [enlace saturado]
 
-Para o cenário L0 (RTT ≈ [?] ms), tem-se 1 + 2a ≈ [?].
+O valor 1 + 2a representa o número de pacotes que "cabem" no
+enlace (pipeline): enquanto o sender transmite 1 + 2a pacotes,
+o primeiro ACK retorna — se a janela for menor, o sender para
+e aguarda.
 
-  Com N = 4:  η ≈ [?] %  → Throughput teórico ≈ [?] kbps
-  Com N = 16: η ≈ [?] %  → Throughput teórico ≈ [?] kbps
+Para o cenário L0 (RTT ≈ [?] ms, conforme Wireshark):
+  a = (RTT/2) / T_trans = ([?]/2 ms) / 0,00211 ms ≈ [?]
+  1 + 2a ≈ [?]
 
-[INSERIR: Compare com os valores medidos nos cenários L0/R0
-para GBN e SR com N=4 e N=16.]
+Throughput teórico por configuração de janela:
+  N = 4:  η = min(4, [?]) / [?] ≈ [?] %  → ≈ [?] kbps
+  N = 16: η = min(16, [?]) / [?] ≈ [?] % → ≈ [?] kbps
+
+Interpretação:
+  Se 1+2a for maior que 16 (condição comum em Gigabit com RTT
+  > 0,07 ms), nenhuma das duas janelas satura o enlace. A janela
+  N=16 oferece throughput 4x superior ao N=4. Para saturar o
+  enlace seria necessária uma janela de tamanho ≥ 1+2a, o que
+  em Gigabit com RTT de 1 ms exigiria N ≥ 475 pacotes.
+
+Throughput medido (cenário L0):
+  GBN N=4:  [?] kbps (esperado: [?] kbps teórico)
+  GBN N=16: [?] kbps (esperado: [?] kbps teórico)
+  SR  N=4:  [?] kbps (esperado: [?] kbps teórico)
+  SR  N=16: [?] kbps (esperado: [?] kbps teórico)
+
+GBN e SR apresentam throughput praticamente idêntico em L0
+porque, sem perda, ambos os protocolos transmitem pacotes em
+ordem contínua sem retransmissões. A diferença entre eles
+surge apenas nos cenários com perda ou reordenação.
 
 
 ----------------------------------------------------------------
@@ -223,21 +373,35 @@ Tabela 3 — Throughput (kbps) dos três protocolos sob latência
   L2      | 100 ms   | [?]    | [?]       | [?]
   L3      | 150 ms   | [?]    | [?]       | [?]
 
-[INSERIR: Análise comparativa sob latência.
+Análise comparativa:
 
-Sugestão de conteúdo:
-- A janela deslizante desacopla o throughput do RTT quando
-  N ≥ 1+2a: o sender não precisa parar e aguardar o ACK.
-  Com N=4 e RTT de [?] ms, o GBN e SR mantêm throughput
-  [X] vezes superior ao SAW nos cenários L2 e L3.
+O SAW degrada linearmente com o aumento de RTT, pois η_SAW =
+1/(1+2a) cai proporcionalmente a a = T_prop/T_trans. Já o GBN
+e o SR, com janela N, suportam um RTT N vezes maior antes de
+atingir a mesma eficiência: η_wnd = N/(1+2a).
 
-- Identifique o ponto a partir do qual mesmo GBN/SR começam
-  a sofrer: quando o RTT excede de tal forma o timeout que
-  a janela se esgota antes dos ACKs chegarem.
+Para N=4 e cenário L0 → L2 (100 ms adicional):
+  - SAW: o RTT aumenta, η cai e retransmissões espúrias
+    começam (timeout de 100 ms atingido). O throughput pode
+    cair para [?]% do valor de L0.
+  - GBN/SR: com N=4 pacotes em voo simultâneo, o pipeline
+    absorve parte do aumento de RTT. O throughput degradação
+    é proporcional a 1/RTT, porém partindo de um patamar 4x
+    superior ao SAW. Retransmissões espúrias também ocorrem
+    no GBN/SR quando o timeout expira, mas com impacto menor
+    pois o sender retransmite a janela e continua avançando.
 
-- GBN e SR apresentam desempenho similar sob latência pura
-  (sem perda), pois o comportamento diverge principalmente
-  sob perda e reordenação.]
+Para L3 (150 ms adicional):
+  O RTT efetivo excede largamente o timeout de 100 ms em todos
+  os protocolos. No SAW, cada pacote gera pelo menos uma
+  retransmissão. No GBN/SR, o timeout individual também dispara
+  para cada pacote, mas o throughput ainda é ≈ N vezes maior
+  que o SAW pela natureza pipeline do envio.
+
+GBN e SR não se distinguem nesse cenário (latência pura, sem
+perda), pois não ocorrem eventos de retransmissão seletiva.
+A diferença entre eles emerge apenas quando pacotes chegam
+fora de ordem ou são perdidos.
 
 
 ----------------------------------------------------------------
@@ -254,23 +418,48 @@ Tabela 4 — Throughput (kbps) e retransmissões sob perda
   P3   | [?]  | [?]   |  [?]  | [?]   |  [?]  | [?]   |  [?]  | [?]
   P4   | [?]  | [?]   |  [?]  | [?]   |  [?]  | [?]   |  [?]  | [?]
 
-[INSERIR: Análise comparativa sob perda.
+Comportamento do GBN sob perda:
+  Quando um pacote é perdido, o receiver descarta todos os
+  pacotes subsequentes recebidos fora de ordem e envia um NACK
+  com o número de sequência esperado. Ao receber o NACK (ou ao
+  expirar o timeout), o sender retransmite TODA a janela a partir
+  do pacote não confirmado, mesmo que os pacotes posteriores
+  tenham chegado corretamente ao receiver. Esse comportamento
+  denomina-se retransmissão em lote (go-back).
 
-Sugestão de conteúdo:
-- No GBN, um único pacote perdido obriga a retransmissão de
-  toda a janela (N pacotes). No SR, apenas o pacote específico
-  é retransmitido.
+  Custo real por evento de perda:
+    Com N=4: até 4 retransmissões por evento
+    Com N=16: até 16 retransmissões por evento
 
-- Com p = 25% e N = 16, o GBN pode retransmitir até 16 pacotes
-  por evento de perda, enquanto o SR retransmite apenas 1.
-  Isso explica a diferença de retransmissões observada na tabela.
+  Eficiência teórica do GBN sob perda p:
+    η_GBN ≈ (1-p) / (1 + (N-1)p)   [para N < 1+2a]
 
-- Relacione com as fórmulas:
-  η_GBN ≈ N(1-p)^N / (1+2a)   [custo cresce com N]
-  η_SR  ≈ (1-p) × min(N, 1+2a) / (1+2a)   [custo independe de N]
+  Observa-se que o denominador cresce com N: janelas maiores
+  amplificam o custo de cada evento de perda. Por isso, para
+  p=25% e N=16, o GBN pode ter desempenho INFERIOR ao N=4,
+  conforme a tabela.
 
-- Conclua que o SR é superior ao GBN sob perda, especialmente
-  com janelas grandes.]
+Comportamento do SR sob perda:
+  O receiver bufferiza pacotes fora de ordem dentro da janela
+  e envia ACK individual para cada um. Quando o pacote faltante
+  chega (por timeout ou NACK), apenas aquele pacote específico
+  é retransmitido. Os demais permanecem no buffer e são entregues
+  em ordem sem necessidade de retransmissão.
+
+  Custo real por evento de perda:
+    Independente de N: exatamente 1 retransmissão por evento
+
+  Eficiência teórica do SR sob perda p:
+    η_SR ≈ (1-p) × min(N, 1+2a) / (1+2a)
+
+  Diferente do GBN, o custo do SR NÃO cresce com N: janelas
+  maiores melhoram o throughput sem amplificar o custo por perda.
+
+Comparação direta (P4, p=25%):
+  O GBN com N=16 retransmite em média 16 × 0,25 = 4 pacotes por
+  janela deslizante. O SR retransmite em média 0,25 × 1 = 0,25
+  pacotes por janela. A razão de retransmissões GBN/SR ≈ 16,
+  o que explica a diferença de throughput observada na Tabela 4.
 
 
 ----------------------------------------------------------------
@@ -286,56 +475,104 @@ Tabela 5 — Throughput (kbps) e retransmissões sob reordenação
   R1   | [?]  | [?]   |  [?]  | [?]   |  [?]  | [?]   |  [?]  | [?]
   R2   | [?]  | [?]   |  [?]  | [?]   |  [?]  | [?]   |  [?]  | [?]
 
-GBN sob reordenação:
-  O receiver descarta qualquer pacote fora da ordem esperada e
-  emite NACK para o SEQ esperado. O sender retransmite toda a
-  janela a partir do SEQ não confirmado.
+Comportamento do GBN sob reordenação:
+  O receiver GBN espera os pacotes estritamente em ordem. Ao
+  receber um pacote com SEQ diferente do esperado, o descarta
+  imediatamente e envia NACK(SEQ_esperado). O sender, ao receber
+  o NACK, retransmite a janela inteira a partir do SEQ indicado.
+  Isso ocorre mesmo que o pacote "faltante" ainda esteja em
+  trânsito, apenas reordenado pela rede.
 
-[INSERIR: Descreva o comportamento observado nas capturas
-gbn_R1.pcapng e gbn_R2.pcapng. Identifique os grupos de
-retransmissão em lote após cada evento de reordenação. Explique
-por que janelas maiores sofrem mais: cada evento com N=16 gera
-até 16 retransmissões desnecessárias, pois os pacotes estavam
-apenas fora de ordem, não perdidos.]
+  Custo da reordenação no GBN:
+    Cada evento de reordenação gera até N retransmissões
+    desnecessárias — os pacotes chegaram, mas foram descartados.
+    Com N=16, um único pacote reordenado pode provocar 16
+    retransmissões de dados perfeitamente válidos.
 
-SR sob reordenação:
-  O receiver bufferiza o pacote fora de ordem dentro da janela,
-  emite ACK individual para ele e aguarda o pacote faltante.
-  Quando o pacote faltante chega, entrega ambos em ordem sem
-  solicitar retransmissão.
+[SCREENSHOT: captura gbn_R1.pcapng — identificar grupo de
+retransmissões em lote após NACK; os mesmos SEQs reaparecem
+no fluxo logo após o NACK]
+[SCREENSHOT: captura gbn_R2.pcapng — comparar volume de
+retransmissões entre N=4 e N=16 no mesmo cenário de reordenação]
 
-[INSERIR: Descreva o comportamento nas capturas sr_R1.pcapng e
-sr_R2.pcapng. Identifique os ACKs individuais fora de ordem e
-a ausência de retransmissões em lote. Explique por que o SR
-praticamente não sofre com reordenação: ele reconhece que um
-pacote recebido fora de ordem ainda é válido e o retém no
-buffer. As capturas devem mostrar o preenchimento de lacunas
-sem retransmissão quando o pacote esperado finalmente chega.]
+Comportamento do SR sob reordenação:
+  O receiver SR mantém um buffer circular de tamanho N. Ao
+  receber um pacote com SEQ dentro da janela (mas fora de ordem),
+  o armazena no buffer e envia ACK individual para aquele SEQ.
+  Quando o pacote "faltante" finalmente chega, o receiver entrega
+  o bloco completo em ordem à aplicação, sem nenhuma solicitação
+  de retransmissão.
+
+  A detecção de pacote dentro da janela usa aritmética modular:
+    diff = (seq - base_seq) % MAX_SEQ
+    Se diff < N: pacote dentro da janela → bufferizar e ACK
+    Se diff < MAX_SEQ//2: pacote já confirmado → re-ACK silencioso
+    Caso contrário: pacote inválido → descartar
+
+  Custo da reordenação no SR:
+    Zero retransmissões. O SR é intrinsecamente imune à
+    reordenação dentro do tamanho de janela, pois distingue
+    "fora de ordem" de "perdido".
+
+[SCREENSHOT: captura sr_R1.pcapng — ACKs individuais fora de
+ordem (ACK(n+1) antes de ACK(n)); ausência de retransmissões]
+[SCREENSHOT: captura sr_R2.pcapng — buffer preenchendo lacuna;
+entrega em lote quando SEQ faltante chega]
+
+A Tabela 5 deve evidenciar que o SR mantém retransmissões ≈ 0
+em todos os cenários de reordenação (R0–R2), enquanto o GBN
+apresenta crescimento proporcional a N × taxa_de_reordenação.
 
 
 ----------------------------------------------------------------
 3.5 Impacto do Tamanho de Janela
 ----------------------------------------------------------------
 
-[INSERIR: Para cada protocolo (GBN e SR), compare N=4 e N=16
-seguindo esta estrutura:
+(a) Sob latência (comparar N=4 e N=16 com dados da Tabela 3):
 
-(a) Sob latência:
-    Janela maior reduz o impacto do RTT (η = N/(1+2a)).
-    Se 1+2a ≈ [?], então N=16 já satura o enlace enquanto N=4
-    ainda deixa ocioso [?]% do tempo. Mostre com os dados da
-    Tabela 3.
+  Throughput teórico com janela N: η = min(N, 1+2a) / (1+2a)
+  Para 1+2a ≈ [?] (cenário L0):
+    N=4 → η = 4/[?] ≈ [?]% → Throughput ≈ [?] kbps
+    N=16 → η = 16/[?] ≈ [?]% → Throughput ≈ [?] kbps
 
-(b) Sob perda:
-    No GBN, N=16 piora o desempenho porque cada evento de perda
-    retransmite 16 pacotes em vez de 4. No SR, o impacto é
-    menor pois só o pacote específico é reenviado em ambos os
-    casos. Compare as colunas N=4 e N=16 da Tabela 4.
+  A janela N=16 oferece throughput [?]× superior ao N=4
+  nos cenários L1 e L2, pois mantém mais pacotes em voo
+  simultâneo, reduzindo a ociosidade do sender enquanto
+  aguarda ACKs.
 
-(c) Sob reordenação:
-    No GBN, N=16 amplifica o custo: cada reordenação gera mais
-    retransmissões. No SR, N=16 tem impacto mínimo pois
-    a bufferização absorve a reordenação. Mostre com Tabela 5.]
+  Sob L3 (RTT muito alto), o timeout de 100 ms começa a
+  limitar ambas as janelas. Com RTT > 100 ms, o sender
+  retransmite antes de o ACK chegar e a janela efetiva
+  se reduz, aproximando o comportamento de ambas as
+  configurações.
+
+(b) Sob perda (comparar N=4 e N=16 com dados da Tabela 4):
+
+  Para o GBN, N=16 piora o desempenho sob alta perda:
+    Custo por evento de perda ∝ N → janela maior = mais retx
+    Em P4 (25%), GBN N=16 deve ter [?] retx contra [?] no N=4,
+    explicando throughput [?]% menor conforme a Tabela 4.
+
+  Para o SR, N=16 melhora ou mantém o throughput sob perda:
+    Custo por evento independe de N → janela maior = mais
+    paralelismo sem amplificar retx.
+    Em P4, SR N=16 deve ter throughput [?]% maior que N=4
+    por manter mais pacotes em voo com o mesmo custo de retx.
+
+  Conclusão intermediária: para redes com perda, N grande
+  é prejudicial no GBN mas benéfico no SR.
+
+(c) Sob reordenação (comparar N=4 e N=16 com dados da Tabela 5):
+
+  No GBN, N=16 amplifica o dano:
+    Cada evento de reordenação descarta e retransmite toda a
+    janela. Com N=16, [?]× mais retransmissões que N=4.
+
+  No SR, N=16 é indiferente ou levemente superior:
+    O buffer absorve a reordenação independentemente do tamanho
+    de janela, desde que a reordenação não exceda N posições.
+    Para R1 e R2 com atrasos típicos do Clumsy, a condição é
+    satisfeita por qualquer janela ≥ 2.
 
 
 ----------------------------------------------------------------
@@ -344,44 +581,171 @@ seguindo esta estrutura:
 
 Tabela 6 — Síntese comparativa dos três protocolos
 
-  Condição de rede              | SAW        | GBN           | SR
-  ------------------------------|------------|---------------|----------
-  Baixa latência, sem perda     | Adequado   | Melhor        | Melhor
-  Alta latência (> 50 ms)       | Inadequado | Bom           | Bom
-  Alta perda (> 5%)             | Ruim       | Ruim (N grande)| Bom
-  Alta reordenação              | N/A        | Ruim          | Bom
-  Complexidade de implementação | Baixa      | Média         | Alta
+  Condição de rede              | SAW        | GBN            | SR
+  ------------------------------|------------|----------------|----------
+  Baixa latência, sem perda     | Adequado   | Melhor         | Melhor
+  Alta latência (> 50 ms)       | Inadequado | Bom            | Bom
+  Alta perda (> 5%), janela grd.| Ruim       | Ruim           | Bom
+  Alta reordenação              | N/A        | Ruim           | Bom
+  Complexidade de implementação | Baixa      | Média          | Alta
 
-[INSERIR: 4 a 6 linhas de conclusão baseadas nos seus dados
-medidos. Estrutura sugerida:
+Conclusão (substituir [?] pelos valores medidos nos testes):
 
-"O SAW mostrou-se viável apenas em [cenário], atingindo
-throughput de [?] kbps no cenário L0/P0 — próximo ao teórico
-de [?] kbps. A partir de [latência ou perda], o SAW degradou
-para [?] kbps, tornando-se impraticável.
+  O Stop-and-Wait mostrou-se viável apenas em redes locais com
+  baixa latência e sem perda (cenário L0/P0), atingindo
+  throughput de [?] kbps — próximo ao valor teórico de [?] kbps.
+  A partir de 50 ms de latência adicional (L1), o throughput
+  caiu para [?] kbps, e com 150 ms (L3) o protocolo tornou-se
+  impraticável, gerando [?] retransmissões espúrias por
+  transferência — em sua maioria causadas por timeout, não por
+  perda real.
 
-O GBN superou o SAW em [?]% no cenário L1 com N=4, mas
-degradou-se em [?]% sob P4 com N=16 devido ao custo de
-retransmissão em lote — [?] retransmissões contra [?] no SR
-no mesmo cenário.
+  O Go-Back-N superou o SAW em [?]% no cenário L1 com N=4,
+  confirmando a vantagem teórica do pipeline de janela
+  deslizante. Contudo, sob perda elevada (P4) com janela N=16,
+  o GBN degradou para [?] kbps e gerou [?] retransmissões —
+  significativamente acima das [?] retransmissões do SR no
+  mesmo cenário. O custo de retransmitir a janela inteira por
+  cada evento de perda limita a aplicabilidade do GBN em redes
+  com qualidade variável.
 
-O SR demonstrou o melhor equilíbrio entre latência e perda:
-manteve throughput de [?] kbps em P4 onde o GBN (N=16) caiu
-para [?] kbps. Nos cenários de reordenação R2, o SR gerou
-apenas [?] retransmissões contra [?] no GBN.
+  O Selective Repeat demonstrou o melhor equilíbrio entre
+  latência e perda: manteve throughput de [?] kbps em P4 (25%
+  de perda) onde o GBN N=16 caiu para [?] kbps. Nos cenários
+  de reordenação (R1 e R2), o SR gerou praticamente zero
+  retransmissões extras contra [?] retransmissões no GBN N=16.
+  O custo de implementação é maior (buffer circular com
+  aritmética modular, timers individuais por pacote, lógica
+  de entrega em ordem), mas o ganho de desempenho justifica
+  essa complexidade em ambientes com perda ou reordenação.
 
-Conclui-se que o SR é o protocolo mais robusto para redes com
-perda e reordenação, enquanto o GBN oferece implementação mais
-simples com desempenho comparável em redes sem perda e sem
-reordenação."
-
-Adapte com os números reais dos seus testes.]
+  Recomendação de uso: SAW para prototipagem e enlaces com RTT
+  muito baixo e sem perda; GBN para redes confiáveis onde a
+  simplicidade de implementação é prioritária; SR para redes
+  de produção com qualidade variável ou enlaces de longa
+  distância.
 
 
 ================================================================
-REFERÊNCIA
+4. USO DE INTELIGÊNCIA ARTIFICIAL
+================================================================
+
+Esta seção documenta o uso de ferramentas de inteligência
+artificial no desenvolvimento deste trabalho, conforme exigido
+pelo enunciado (TF_20261_labredes).
+
+Ferramentas utilizadas:
+  - Claude (Anthropic) — modelo claude-sonnet-4-6, acessado
+    via Claude Code (CLI) integrado ao VS Code
+  [INSERIR: outras ferramentas, se utilizadas pelos integrantes]
+
+Modelos utilizados:
+  - claude-sonnet-4-6 (Anthropic, 2025)
+
+Como as ferramentas foram empregadas:
+
+  1. Implementação do protocolo (srtp.py):
+     A IA gerou o código completo das três variantes (SAW,
+     GBN, SR) com base no enunciado fornecido em PDF. Isso
+     incluiu: o formato binário do cabeçalho de 9 bytes com
+     bit-packing, o handshake de três vias com negociação de
+     janela, o CRC32 via zlib, o mecanismo de timeout com
+     select.select() não-bloqueante, e o tratamento de casos
+     de borda (arquivo vazio, arquivo múltiplo exato de 255
+     bytes, wrap-around do número de sequência).
+
+  2. Depuração — condição de corrida no encerramento:
+     A IA identificou e corrigiu um bug crítico: o receiver
+     fechava seu socket imediatamente após receber o último
+     pacote de dados, antes de o sender enviar o FIN. O sender
+     então ficava em loop infinito chamando close_sender() sem
+     resposta. A solução foi manter o socket do receiver aberto
+     após o último dado (flag data_done = True) e continuar
+     o loop aguardando o FIN por até 5 segundos, com a correção
+     simétrica de limitar close_sender() a 20 tentativas.
+
+  3. Estruturação do relatório técnico:
+     A IA gerou o template completo do relatório (este arquivo)
+     com as seções obrigatórias, fórmulas de throughput teórico,
+     análises pré-preenchidas com raciocínio baseado na teoria
+     de Kurose & Ross, e marcadores explícitos para os dados
+     experimentais que precisam ser inseridos manualmente.
+
+  4. [INSERIR: outras contribuições, se houver — ex.: revisão
+     de análises, geração de gráficos, formatação no Gemini]
+
+Principais contribuições da IA:
+  - Implementação correta do campo Length com valor sentinela 0
+    para arquivos múltiplos exatos de 255 bytes.
+  - Lógica de janela SR com detecção de pacotes fora de janela
+    usando diff = (seq - base) % MAX_SEQ.
+  - Mecanismo de ACK cumulativo no GBN: busca do SEQ na faixa
+    [base, base+wnd] com avanço de ponteiro.
+  - Cálculo de timeout restante em select.select() para evitar
+    busy-waiting durante espera de ACKs.
+  - Sincronização correta do encerramento (receiver aguarda FIN).
+
+Exemplos representativos de prompts/consultas feitos à IA:
+
+  Prompt 1:
+  "Implemente esse trabalho de laboratório de redes de acordo
+  com todos os requisitos cumpridos e validações completas."
+  [enunciado PDF anexado]
+  → Gerou a implementação inicial completa de srtp.py.
+
+  Prompt 2:
+  "O receiver estava fechando o socket antes do sender enviar
+  o FIN, fazendo close_sender() loopar para sempre. Como
+  corrigir sem usar threads?"
+  → Introduziu a flag data_done e o FIN_WAIT de 5 segundos.
+
+  Prompt 3:
+  "O enunciado solicita relatório? Escreva o relatório com
+  estrutura completa, deixando espaços marcados para dados
+  experimentais, sinalizando claramente o que deve ser inserido
+  manualmente."
+  → Gerou relatorio.tex e relatorio.txt com todos os marcadores.
+
+  Prompt 4:
+  "Existe diferença entre esses dois enunciados?" [dois PDFs
+  anexados]
+  → Identificou a seção obrigatória de IA e a diferença de
+  prazo (28/06 vs. 29/06).
+
+  [INSERIR: outros prompts utilizados pelos integrantes —
+  incluindo os feitos durante os testes experimentais, se houver]
+
+Outras referências utilizadas:
+  - KUROSE, J. F.; ROSS, K. W. Redes de Computadores e a
+    Internet: Uma Abordagem Top-Down. 8. ed. Pearson, 2021.
+    Cap. 3, Seção 3.4 (Stop-and-Wait, GBN, SR).
+  - Python Software Foundation. Módulo select — I/O multiplexing.
+    Python 3 Standard Library. Disponível em: python.org/docs.
+  - Python Software Foundation. Módulo zlib — Compressão e CRC.
+    Python 3 Standard Library. Disponível em: python.org/docs.
+  - Wireshark Foundation. Wireshark User's Guide. Disponível em:
+    wireshark.org.
+  [INSERIR: RFCs, vídeos, artigos ou outros materiais consultados]
+
+
+================================================================
+REFERÊNCIAS
 ================================================================
 
 KUROSE, J. F.; ROSS, K. W. Redes de Computadores e a Internet:
 Uma Abordagem Top-Down. 8. ed. Pearson, 2021. Seção 3.4.
+
+PYTHON SOFTWARE FOUNDATION. Módulo select — I/O multiplexing.
+Python 3.x Standard Library, 2024. Disponível em:
+<https://docs.python.org/3/library/select.html>.
+
+PYTHON SOFTWARE FOUNDATION. Módulo zlib — Compressão e CRC32.
+Python 3.x Standard Library, 2024. Disponível em:
+<https://docs.python.org/3/library/zlib.html>.
+
+WIRESHARK FOUNDATION. Wireshark User's Guide. Version 4.x, 2024.
+Disponível em: <https://www.wireshark.org/docs/wsug_html/>.
+
+[INSERIR: demais referências no formato ABNT]
+
 ================================================================
