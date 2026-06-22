@@ -3,12 +3,12 @@
 % Laboratório de Redes de Computadores — PUCRS
 % Compilar: pdflatex relatorio.tex
 % ============================================================
-\documentclass[12pt,a4paper]{article}
+\documentclass[10pt,a4paper]{article}
 
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
 \usepackage[brazil]{babel}
-\usepackage[top=2.54cm,bottom=2.54cm,left=2.54cm,right=2.54cm]{geometry}
+\usepackage[top=1.7cm,bottom=1.7cm,left=1.7cm,right=1.7cm]{geometry}
 \usepackage{times}
 \usepackage{setspace}
 \usepackage{amsmath}
@@ -23,13 +23,13 @@
 \usepackage{fancyhdr}
 \usepackage{titlesec}
 
-\onehalfspacing
+\setstretch{1.03}
 
 % Cores para marcações de dados experimentais
 \definecolor{fillcolor}{RGB}{255,230,180}
 \definecolor{bordercolor}{RGB}{200,120,0}
 \newcommand{\FILL}[1]{%
-  \colorbox{fillcolor}{\parbox{\linewidth-2\fboxsep}{\textcolor{bordercolor}{\textbf{[INSERIR:} #1\textbf{]}}}}%
+  \colorbox{fillcolor}{\parbox{\dimexpr\linewidth-2\fboxsep\relax}{\textcolor{bordercolor}{\textbf{[INSERIR:} #1\textbf{]}}}}%
 }
 \newcommand{\FILLVAL}[1]{%
   \colorbox{fillcolor}{\textcolor{bordercolor}{\textbf{?}}}\,%    % valor inline
@@ -38,6 +38,7 @@
 % Cabeçalho/rodapé
 \pagestyle{fancy}
 \fancyhf{}
+\setlength{\headheight}{13.6pt}
 \rhead{\small SRTP — Protocolo de Transporte Confiável sobre UDP}
 \lhead{\small Lab. Redes de Computadores — PUCRS}
 \rfoot{\small Página \thepage}
@@ -54,11 +55,11 @@
   {\LARGE\textbf{Protocolo de Transporte Confiável sobre UDP}}\\[4pt]
   {\large Relatório Técnico — Trabalho Final}\\[6pt]
   {\normalsize
-    \FILL{Nome completo do integrante 1} \\
-    \FILL{Nome completo do integrante 2} \\
-    \FILL{Nome completo do integrante 3 (se houver)}
+    {Diogo Pessin Camargo} \\
+    {Enzo Augusto Tonatto} \\
+    {Fernanda Farias Ubeti}
   }\\[4pt]
-  {\small \FILL{Data de entrega (ex.: 29/06/2026)}}
+  {\small{22/06/2026}}
 \end{center}
 
 \vspace{-4pt}
@@ -103,23 +104,25 @@ propagação e o tempo de transmissão.
 \end{itemize}
 
 \vspace{4pt}
-\FILL{Inserir o RTT medido no Wireshark no cenário L0/P0 (captura \texttt{saw\_L0.pcapng}).
-Procure o tempo entre o início do pacote de dados e o ACK correspondente — esse é o RTT
-observado. Exemplo de linha: \emph{``RTT medido no cenário L0/P0: X\,ms (média de Y amostras)''}.}
+RTT medido no cenário L0/P0: aproximadamente 0{,}116\,ms, obtido a partir de
+pares DATA/ACK na captura \texttt{saw\_L0.pcapng}. No par analisado, o pacote de
+dados foi observado em 19{,}358442500\,s e o ACK correspondente em
+19{,}358558500\,s, resultando em RTT de 0{,}000116\,s.
 
 \vspace{4pt}
-\noindent Com $RTT = $ \FILLVAL{} ms, tem-se $a = RTT/(2\,T_{\text{trans}}) = $ \FILLVAL{}
+\noindent Com $RTT = 0{,}116$ ms, tem-se $a = RTT/(2\,T_{\text{trans}}) \approx 27{,}5$
 e, pela Equação~\ref{eq:saw}:
 
 \begin{equation*}
-  \eta_{\text{SAW}} = \frac{1}{1 + 2 \times \FILLVAL{}} \approx \FILLVAL{}\%
+  \eta_{\text{SAW}} = \frac{1}{1 + 2 \times 27{,}5} \approx 1{,}8\%
   \quad\Rightarrow\quad
-  S_{\text{teórico}} = \eta \cdot R \approx \FILLVAL{}\,\text{kbps}
+  S_{\text{teórico}} = \eta \cdot R \approx 18000\,\text{kbps}
 \end{equation*}
 
-\FILL{Inserir o throughput \textbf{medido} no cenário L0/P0 (bytes transferidos / tempo total
-reportado pelo sender). Compare com o valor teórico acima e discuta possíveis
-discrepâncias (overhead de chamadas de sistema, jitter local, etc.).}
+No cenário L0/P0, a transferência de 12800\,bytes (51 pacotes) foi concluída com
+throughput medido de 3629{,}4\,kbps e 0 retransmissões. A captura
+\texttt{saw\_L0.pcapng} foi salva como evidência, e o hash MD5 do arquivo recebido
+coincidiu com o hash do arquivo original.
 
 % ---------------------------------------------------------
 \subsection{Cenários de Latência (L0–L3)}
@@ -135,20 +138,28 @@ A Tabela~\ref{tab:latencia_saw} apresenta os resultados.
 \toprule
 \textbf{Cenário} & \textbf{Latência adicional} & \textbf{Throughput medido} & \textbf{Retransmissões} \\
 \midrule
-L0 & 0\,ms (baseline) & \FILLVAL{}\,kbps & \FILLVAL{} \\
-L1 & 50\,ms            & \FILLVAL{}\,kbps & \FILLVAL{} \\
-L2 & 100\,ms           & \FILLVAL{}\,kbps & \FILLVAL{} \\
-L3 & 150\,ms           & \FILLVAL{}\,kbps & \FILLVAL{} \\
+L0 & 0\,ms (baseline) & 3629{,}4\,kbps & 0 \\
+L1 & 50\,ms            & 23{,}7\,kbps & 0 \\
+L2 & 100\,ms (95\,ms efetivo) & 18{,}4\,kbps & 41 \\
+L3 & 150\,ms           & não concluiu & timeout contínuo \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\FILL{Análise dos cenários de latência: explique como o aumento do RTT reduz o throughput
-no SAW (conforme a Equação~\ref{eq:saw}). Destaque a transição L1→L2: com latência de
-100\,ms adicionada, o RTT total se aproxima ou supera o timeout de 100\,ms, causando
-retransmissões mesmo sem perda real. Na transição L2→L3 (150\,ms), o RTT efetivo excede
-o timeout com mais frequência, aumentando ainda mais as retransmissões e degradando o
-throughput. Use os dados da tabela e as capturas Wireshark como evidência.}
+Nos cenários de latência, o throughput caiu de 3629{,}4\,kbps em L0 para
+23{,}7\,kbps em L1, pois o SAW mantém apenas um pacote em trânsito e precisa
+aguardar um ACK antes de avançar. Em L2, a configuração exata de 100\,ms no
+Clumsy coincidiu com o timeout fixo do protocolo e levou a retransmissões
+contínuas; por isso, foi usada uma aproximação prática de 95\,ms para obter uma
+medida final. Mesmo assim, o sender registrou 41 retransmissões e throughput de
+18{,}4\,kbps, evidenciando a transição crítica quando o atraso se aproxima do
+timeout. As capturas \texttt{saw\_L1.pcapng} e \texttt{saw\_L2.pcapng} mostram
+os ACKs chegando cada vez mais próximos do limite de 100\,ms e a repetição de
+pacotes com o mesmo SEQ em L2. Em L3, com 150\,ms de latência, a transferência
+não concluiu em tempo razoável: o atraso ficou maior que o timeout fixo, fazendo
+o sender retransmitir continuamente antes de receber confirmações úteis. A
+captura \texttt{saw\_L3\_timeout.pcapng} foi mantida como evidência desse
+comportamento de colapso do SAW quando o RTT efetivo excede o timeout.
 
 % ---------------------------------------------------------
 \subsection{Cenários de Perda (P0–P4)}
@@ -163,11 +174,11 @@ Taxa de perda artificial inserida com \textit{Clumsy}.
 \toprule
 \textbf{Cenário} & \textbf{Taxa de perda} & \textbf{Throughput medido} & \textbf{Retransmissões} \\
 \midrule
-P0 & 0\%  (baseline) & \FILLVAL{}\,kbps & \FILLVAL{} \\
-P1 & 1\%             & \FILLVAL{}\,kbps & \FILLVAL{} \\
-P2 & 5\%             & \FILLVAL{}\,kbps & \FILLVAL{} \\
-P3 & 10\%            & \FILLVAL{}\,kbps & \FILLVAL{} \\
-P4 & 25\%            & \FILLVAL{}\,kbps & \FILLVAL{} \\
+P0 & 0\%  (baseline) & 3629{,}4\,kbps & 0 \\
+P1 & 1\%             & 846{,}9\,kbps & 1 \\
+P2 & 5\%             & 188{,}5\,kbps & 5 \\
+P3 & 10\%            & 150{,}8\,kbps & 5 \\
+P4 & 25\%            & 72{,}0\,kbps & 12 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -182,11 +193,16 @@ P4 & 25\%            & \FILLVAL{}\,kbps & \FILLVAL{} \\
 pois o número esperado de transmissões por pacote é $1/(1-p)$ (distribuição geométrica)
 e cada transmissão ocupa $RTT + L/R$ segundos.
 
-\FILL{Análise dos cenários de perda: compare os valores medidos da tabela com o
-throughput teórico da Equação~\ref{eq:saw_loss} para cada taxa $p$. Explique como
-25\% de perda impacta desproporcionalmente o throughput no SAW — cada retransmissão
-consome um timeout completo de 100\,ms. Cite os números de retransmissões e use as
-capturas para identificar padrões de timeout.}
+Nos cenários de perda, o aumento da taxa de descarte reduziu o throughput e
+elevou as retransmissões. Em P1 (1\%), houve apenas 1 retransmissão e o
+throughput medido foi 846{,}9\,kbps. Em P2 (5\%) e P3 (10\%), foram observadas
+5 retransmissões, com throughput de 188{,}5\,kbps e 150{,}8\,kbps,
+respectivamente. Em P4 (25\%), o custo do SAW ficou mais evidente: 12
+retransmissões e throughput de apenas 72{,}0\,kbps. Como o protocolo envia um
+único pacote por vez, cada perda força o sender a aguardar o timeout de 100\,ms
+antes de retransmitir. As capturas \texttt{saw\_P1.pcapng} a
+\texttt{saw\_P4.pcapng} mostram os intervalos sem ACK seguidos pela retransmissão
+do mesmo SEQ.
 
 % ---------------------------------------------------------
 \subsection{Comportamento do CRC32}
@@ -196,12 +212,14 @@ concatenado com o payload. Pacotes corrompidos são \textbf{descartados silencio
 pelo receiver sem envio de NACK, pois nenhum campo — inclusive o SEQ — é confiável.
 O \textit{timeout} de 100\,ms no sender dispara a retransmissão.
 
-\FILL{Inserir referência à captura Wireshark que demonstra o descarte silencioso.
-Descreva: (a) como o pacote corrompido foi identificado na captura (ex.: campo CRC
-incorreto ou ausência de ACK após o envio); (b) o comportamento do sender após o
-timeout (retransmissão do mesmo SEQ); (c) o que ocorreria sem CRC32 — o receiver
-aceitaria dados corrompidos como válidos, causando corrupção silenciosa do arquivo
-transferido sem possibilidade de detecção na camada de transporte.}
+No teste com \textit{Tamper} no Clumsy, a transferência SAW concluiu com
+throughput de 148{,}5\,kbps e 5 retransmissões. A captura
+\texttt{saw\_crc.pcapng} mostra pacotes de dados corrompidos que não receberam
+ACK imediato; após o timeout de 100\,ms, o sender retransmitiu o mesmo SEQ. Esse
+comportamento confirma que o receiver descartou silenciosamente os pacotes cujo
+CRC32 recalculado não coincidia com o valor do cabeçalho. Sem o CRC32, esses
+payloads corrompidos poderiam ser aceitos como válidos, causando corrupção
+silenciosa no arquivo entregue à aplicação.
 
 % ============================================================
 \section{Parte 2 — Go-Back-N e Selective Repeat}
@@ -219,9 +237,9 @@ Com janela de tamanho $N$, a eficiência do protocolo de janela deslizante é:
   \label{eq:window}
 \end{equation}
 
-Para o cenário L0 ($RTT \approx$ \FILLVAL{} ms), tem-se $1 + 2a \approx$ \FILLVAL{}.
-Com $N = 4$: $\eta \approx$ \FILLVAL{}\%.
-Com $N = 16$: $\eta \approx$ \FILLVAL{}\%.
+Para o cenário L0 ($RTT \approx 0{,}116$ ms), tem-se $1 + 2a \approx 56$.
+Com $N = 4$: $\eta \approx 7{,}1\%$.
+Com $N = 16$: $\eta \approx 28{,}6\%$.
 
 % ---------------------------------------------------------
 \subsection{Análise Comparativa sob Latência (SAW vs.\ GBN vs.\ SR)}
@@ -234,19 +252,23 @@ Com $N = 16$: $\eta \approx$ \FILLVAL{}\%.
 \toprule
 \textbf{Cenário} & \textbf{Latência} & \textbf{SAW} & \textbf{GBN (N=4)} & \textbf{SR (N=4)} \\
 \midrule
-L0 & 0\,ms   & \FILLVAL{} & \FILLVAL{} & \FILLVAL{} \\
-L1 & 50\,ms  & \FILLVAL{} & \FILLVAL{} & \FILLVAL{} \\
-L2 & 100\,ms & \FILLVAL{} & \FILLVAL{} & \FILLVAL{} \\
-L3 & 150\,ms & \FILLVAL{} & \FILLVAL{} & \FILLVAL{} \\
+L0 & 0\,ms   & 3629{,}4 & 9830{,}6 & 10758{,}9 \\
+L1 & 50\,ms  & 23{,}7 & 86{,}1 & 88{,}2 \\
+L2 & 100\,ms & 18{,}4 & 87{,}0\,(70\,ms) & não concluiu \\
+L3 & 150\,ms & não concluiu & não concluiu & não concluiu \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\FILL{Análise comparativa sob latência: a janela deslizante desacopla o throughput
-do RTT quando $N \geq 1+2a$ — o sender não precisa parar para aguardar ACK. Explique
-por que GBN e SR mantêm throughput significativamente superior ao SAW em L2 e L3.
-Identifique o ponto a partir do qual mesmo GBN/SR começam a sofrer (quando o RTT
-excede o timeout e a janela esgota antes dos ACKs chegarem).}
+Sob latência baixa, GBN e SR superaram o SAW por manterem múltiplos pacotes em
+trânsito: em L0, GBN atingiu 9830{,}6\,kbps e SR 10758{,}9\,kbps contra
+3629{,}4\,kbps do SAW. Em L1, a vantagem da janela também apareceu: GBN e SR
+ficaram em torno de 86--88\,kbps, enquanto o SAW caiu para 23{,}7\,kbps. Em
+latências próximas ou superiores ao timeout fixo de 100\,ms, porém, todos os
+protocolos sofreram. O SAW apresentou retransmissões em L2 e não concluiu em
+L3; o GBN só concluiu com uma aproximação de 70\,ms em L2; e o SR não concluiu
+em L2/L3. As capturas de timeout mostram que, quando os ACKs chegam depois do
+timeout, o sender retransmite antes de receber confirmações úteis.
 
 % ---------------------------------------------------------
 \subsection{Análise Comparativa sob Perda (GBN vs.\ SR)}
@@ -262,21 +284,24 @@ excede o timeout e a janela esgota antes dos ACKs chegarem).}
 \cmidrule{3-5}\cmidrule{7-9}
 \textbf{Cen.} & \textbf{Perda} & N=4 kbps & N=4 retx & N=16 retx & & N=4 kbps & N=4 retx & N=16 retx \\
 \midrule
-P1 & 1\%  & \FILLVAL{} & \FILLVAL{} & \FILLVAL{} & & \FILLVAL{} & \FILLVAL{} & \FILLVAL{} \\
-P2 & 5\%  & \FILLVAL{} & \FILLVAL{} & \FILLVAL{} & & \FILLVAL{} & \FILLVAL{} & \FILLVAL{} \\
-P3 & 10\% & \FILLVAL{} & \FILLVAL{} & \FILLVAL{} & & \FILLVAL{} & \FILLVAL{} & \FILLVAL{} \\
-P4 & 25\% & \FILLVAL{} & \FILLVAL{} & \FILLVAL{} & & \FILLVAL{} & \FILLVAL{} & \FILLVAL{} \\
+P1 & 1\%  & 855{,}0 & 0 & 137 & & 842{,}4 & 0 & 2 \\
+P2 & 5\%  & 13{,}3 & 100138 & 12705 & & 820{,}3 & 14 & 34 \\
+P3 & 10\% & não concluiu & timeout & 16622 & & 816{,}3 & 14 & 32 \\
+P4 & 25\% & não concluiu & timeout & timeout & & 230{,}8 & 23 & 45 \\
 \bottomrule
 \end{tabular}}
 \end{table}
 
-\FILL{Análise comparativa sob perda: no GBN, um único pacote perdido obriga a
-retransmissão de \emph{toda} a janela ($N$ pacotes). No SR, apenas o pacote
-específico é retransmitido. Com perda alta (P4 = 25\%) e janela grande ($N=16$),
-o GBN retransmite até 16 pacotes por evento de perda — explique como isso degrada
-o throughput em relação ao SR. Relacione com a Equação~\ref{eq:window}: no GBN sob
-perda, a eficiência efetiva é $\eta_{\text{GBN}} \approx N(1-p)^N / (1+2a)$,
-enquanto no SR $\eta_{\text{SR}} \approx (1-p) \cdot \min(N, 1+2a) / (1+2a)$.}
+Sob perda, o GBN degradou muito mais rapidamente que o SR. Com $N=4$, o GBN
+ficou em 855{,}0\,kbps em P1, mas caiu para 13{,}3\,kbps em P2, com 100138
+retransmissões; em P3 e P4, não concluiu. Com $N=16$, o GBN ainda concluiu P1,
+P2 e P3, mas com alto custo de retransmissão (137, 12705 e 16622
+retransmissões), e não concluiu em P4. Isso ocorre porque, no GBN, a perda de um
+pacote obriga a retransmissão da janela a partir do pacote não confirmado. O SR
+foi mais estável: com $N=4$, concluiu P1--P4 com throughput de 842{,}4,
+820{,}3, 816{,}3 e 230{,}8\,kbps; com $N=16$, também concluiu todos os cenários,
+com retransmissões crescendo de 2 em P1 para 45 em P4. Os dados confirmam que a
+retransmissão seletiva reduz o custo de perda em comparação ao go-back em lote.
 
 % ---------------------------------------------------------
 \subsection{Análise Comparativa sob Reordenação (R0–R2)}
@@ -295,9 +320,9 @@ fundamental de comportamento entre GBN e SR.
 \cmidrule{3-4}\cmidrule{6-7}
 \textbf{Cen.} & \textbf{Reordenação} & N=4 (kbps / retx) & N=16 (kbps / retx) & & N=4 (kbps / retx) & N=16 (kbps / retx) \\
 \midrule
-R0 & 0\%  & \FILLVAL{} / \FILLVAL{} & \FILLVAL{} / \FILLVAL{} & & \FILLVAL{} / \FILLVAL{} & \FILLVAL{} / \FILLVAL{} \\
-R1 & 10\% & \FILLVAL{} / \FILLVAL{} & \FILLVAL{} / \FILLVAL{} & & \FILLVAL{} / \FILLVAL{} & \FILLVAL{} / \FILLVAL{} \\
-R2 & 25\% & \FILLVAL{} / \FILLVAL{} & \FILLVAL{} / \FILLVAL{} & & \FILLVAL{} / \FILLVAL{} & \FILLVAL{} / \FILLVAL{} \\
+R0 & 0\%  & 14545{,}4 / 0 & 12854{,}9 / 0 & & 6736{,}8 / 0 & 11112{,}2 / 0 \\
+R1 & 10\% & não concluiu & timeout & & não concluiu & timeout \\
+R2 & 25\% & não concluiu & timeout & & não concluiu & timeout \\
 \bottomrule
 \end{tabular}}
 \end{table}
@@ -307,32 +332,42 @@ fora da ordem esperada e emite um NACK para o SEQ esperado. O sender, ao receber
 NACK ou ao sofrer timeout, retransmite \emph{toda a janela} a partir do SEQ não
 confirmado.
 
-\FILL{Descreva o comportamento observado nas capturas \texttt{gbn\_R1.pcapng} e
-\texttt{gbn\_R2.pcapng}: identifique os grupos de retransmissão em lote após cada
-evento de reordenação. Explique por que janelas maiores sofrem mais em reordenação
-(cada evento de reordenação com $N=16$ gera até 16 retransmissões).}
+Nas capturas \texttt{gbn\_R1\_N4\_timeout.pcapng},
+\texttt{gbn\_R2\_N4\_timeout.pcapng}, \texttt{gbn\_R1\_N16\_timeout.pcapng} e
+\texttt{gbn\_R2\_N16\_timeout.pcapng}, observa-se que a reordenação provocou
+recebimento fora da ordem esperada, descarte pelo receiver GBN e retransmissões
+em lote após NACK ou timeout. O baseline R0 concluiu bem para $N=4$ e $N=16$,
+mas R1/R2 não concluíram em tempo razoável. O comportamento é coerente com o
+GBN: como o receiver não bufferiza fora de ordem, a reordenação é tratada como
+perda, e uma janela maior amplia o custo de cada evento.
 
 \noindent\textbf{SR sob reordenação:} o receiver bufferiza o pacote fora de ordem
 dentro da janela, emite ACK individual para ele e aguarda o pacote faltante. Quando
 o pacote faltante chega, entrega ambos em ordem sem solicitar retransmissão.
 
-\FILL{Descreva o comportamento nas capturas \texttt{sr\_R1.pcapng} e
-\texttt{sr\_R2.pcapng}: identifique os ACKs individuais fora de ordem e a ausência
-de retransmissões em lote. Explique por que o SR praticamente não sofre com
-reordenação — ele reconhece que um pacote em ordem diferente ainda é válido e o
-retém no buffer.}
+Nas capturas \texttt{sr\_R1\_N4\_timeout.pcapng},
+\texttt{sr\_R2\_N4\_timeout.pcapng}, \texttt{sr\_R1\_N16\_timeout.pcapng} e
+\texttt{sr\_R2\_N16\_timeout.pcapng}, os cenários com reordenação também não
+concluíram. Embora o SR implemente bufferização de pacotes fora de ordem, o
+padrão produzido pelo Clumsy gerou lacunas persistentes e timeouts suficientes
+para impedir a conclusão em tempo razoável. Assim, os resultados medidos mostram
+que a implementação conclui corretamente sem reordenação (R0), mas fica instável
+sob reordenação artificial intensa nesse ambiente de teste.
 
 % ---------------------------------------------------------
 \subsection{Impacto do Tamanho de Janela}
 
-\FILL{Para cada protocolo (GBN e SR), compare os resultados obtidos com $N=4$ e
-$N=16$. Siga a estrutura: (a) sob latência — janela maior reduz o impacto do RTT
-conforme a Equação~\ref{eq:window}, mostrando ganho de throughput até $N \geq 1+2a$;
-(b) sob perda — no GBN, janela maior amplifica o custo de retransmissão; no SR,
-o impacto é menor pois só o pacote específico é reenviado; (c) sob reordenação —
-janela maior aumenta o custo no GBN (mais pacotes retransmitidos por evento) mas tem
-impacto mínimo no SR. Use os dados das Tabelas~\ref{tab:lat_comp},
-\ref{tab:loss_comp} e~\ref{tab:reorder}.}
+O aumento de janela melhorou o potencial de throughput em cenários sem perda:
+em R0, GBN obteve 14545{,}4\,kbps com $N=4$ e 12854{,}9\,kbps com $N=16$, e SR
+obteve 6736{,}8\,kbps com $N=4$ e 11112{,}2\,kbps com $N=16$. Sob perda, porém,
+o efeito depende do protocolo. No GBN, a janela maior aumentou o custo dos
+eventos de perda: em P1, $N=16$ já registrou 137 retransmissões; em P2/P3, foram
+12705 e 16622; e em P4 houve timeout. No SR, a janela maior preservou melhor o
+throughput, mas aumentou o número absoluto de retransmissões em alguns cenários
+(por exemplo, P4 passou de 23 retransmissões em $N=4$ para 45 em $N=16$). Sob
+reordenação, os cenários R1/R2 não concluíram para ambos, indicando que a
+combinação entre reordenação artificial e timeout fixo foi severa para esta
+implementação.
 
 % ---------------------------------------------------------
 \subsection{Conclusão Comparativa}
@@ -357,25 +392,31 @@ Complexidade de implementação  & Baixa & Média & Alta \\
 \end{tabular}
 \end{table}
 
-\FILL{Escreva 4–6 linhas de conclusão comparativa baseada nos seus dados medidos.
-Exemplo de estrutura: ``O SAW mostrou-se viável apenas em [cenário X], atingindo
-throughput de [Y] kbps no cenário L0/P0. O GBN superou o SAW em [X]\% no cenário
-L1, mas degradou-se em [Z]\% sob P4 com N=16 devido ao custo de retransmissão em
-lote. O SR demonstrou melhor equilíbrio entre latência e perda, especialmente nos
-cenários R1 e R2, onde o GBN sofreu [W] retransmissões contra [V] no SR.
-Conclui-se que o SR é o protocolo mais robusto para redes com perda e reordenação,
-enquanto o GBN oferece implementação mais simples com desempenho comparável em
-redes sem perda.''\ Adapte com os números reais.}
+Os resultados mostram que o SAW é simples e correto, mas pouco eficiente quando
+o RTT cresce: saiu de 3629{,}4\,kbps em L0 para 23{,}7\,kbps em L1, e não
+concluiu em L3. O GBN alcançou bom desempenho em cenários sem perda ou com perda
+baixa, mas degradou rapidamente quando houve perda moderada, devido à
+retransmissão em lote da janela. O SR apresentou o melhor comportamento sob
+perda, concluindo P1--P4 tanto com $N=4$ quanto com $N=16$, embora com aumento de
+retransmissões. Sob reordenação artificial, os cenários R1/R2 não concluíram em
+tempo razoável para GBN e SR, o que evidencia a sensibilidade da implementação
+ao padrão de reordenação gerado pelo Clumsy e ao timeout fixo de 100\,ms.
 
 % ============================================================
-\vspace{6pt}
-\hrule
-\vspace{4pt}
-\noindent{\footnotesize
-\textbf{Nota sobre os marcadores} [\textcolor{bordercolor}{INSERIR: ...}]:
-esses campos em laranja devem ser substituídos pelos dados experimentais coletados
-durante os testes com o Wireshark entre as máquinas do grupo. Remova os marcadores
-antes da entrega final.
-}
+\section{Uso de Inteligência Artificial}
+
+Foram utilizadas ferramentas de inteligência artificial generativa durante o
+desenvolvimento do trabalho, principalmente ChatGPT/Codex e Claude. As
+ferramentas auxiliaram na interpretação do enunciado, revisão da conformidade do
+protocolo, organização dos experimentos, depuração de problemas de execução,
+estruturação do relatório e redação das análises.
+
+Exemplos representativos de consultas incluem: como interpretar o formato de
+cabeçalho SRTP; como executar os testes com Clumsy e Wireshark; como analisar os
+efeitos de timeout de 100\,ms nos cenários de latência; e como comparar SAW, GBN
+e SR sob perda e reordenação. As decisões finais, execução dos experimentos,
+coleta de capturas e validação por hash foram realizadas pelos integrantes do
+grupo. Também foram usadas como referência a Seção 3.4 de Kurose \& Ross e a
+documentação técnica das ferramentas Python, Wireshark e Clumsy.
 
 \end{document}
